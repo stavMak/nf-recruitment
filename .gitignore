@@ -1,0 +1,15 @@
+# Αρχεία που παράγει το Nextflow
+work/
+results/
+.nextflow/
+.nextflow.log*
+
+# Reports
+*.html
+timeline*.html
+report*.html
+
+# Σκουπίδια συστήματος / editor
+.DS_Store
+*.swp
+samplesheet.csv
