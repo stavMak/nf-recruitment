@@ -5,9 +5,9 @@ params.input  = 'samplesheet.csv'
 params.outdir = 'results'
 
 process FASTQC {
-    tag "$sample"
+    tag "${sample}"
     conda 'bioconda::fastqc=0.11.9'
-    publishDir "${params.outdir}/1_fastqc/${sample}", mode: 'copy'
+    publishDir { "${params.outdir}/1_fastqc/${sample}" }, mode: 'copy'
     cpus 4
 
     input:
