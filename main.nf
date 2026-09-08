@@ -22,6 +22,23 @@ process FASTQC {
     """
 }
 
+process COUNT_READS {
+    tag "${sample}"
+
+    input:
+    tuple val(sample), path(reads)
+
+    output:
+    path("${sample}_count.tsv"), emit: count
+
+    script:
+    """
+    n_lines=\$(zcat ${reads[0]} | wc -l)
+    n_reads=\$((n_lines / 4))
+    printf "%s\\t%s\\n" "${sample}" "\${n_reads}" > ${sample}_count.tsv
+    """
+}
+
 workflow {
     // Read the samplesheet, one row per sample, and build (sample, [R1, R2]) tuples
     reads_ch = Channel
@@ -32,4 +49,10 @@ workflow {
         }
 
     FASTQC(reads_ch)
+    COUNT_READS(reads_ch)
+
+    // Merge every sample's small count file into one norm.tsv
+    COUNT_READS.out.count
+        .collectFile(name: 'norm.tsv', storeDir: params.outdir)
 }
+
