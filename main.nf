@@ -1,8 +1,11 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-params.input  = 'samplesheet.csv'
-params.outdir = 'results'
+params.input         = 'samplesheet.csv'
+params.outdir        = 'results'
+params.reference     = '/media/penbio24/sata2/stavroula/20251027_spiking/20260611_recruitment_analysis/metapop/0_genomes/FZB42/FZB42_assembly.fna'
+params.min_identity  = 90
+params.min_coverage  = 90
 
 process FASTQC {
     tag "${sample}"
@@ -98,6 +101,56 @@ process MULTIQC_FASTP {
     """
 }
 
+process MAP_FILTER {
+    tag "${sample}"
+    conda 'bioconda::strobealign=0.13.0 bioconda::samtools=1.19 conda-forge::gawk'
+    publishDir { "${params.outdir}/5_mapping/${sample}" }, mode: 'copy'
+    cpus 15
+
+    input:
+    tuple val(sample), path(r1), path(r2)
+
+    output:
+    tuple val(sample), path("${sample}_filtered.bam"), path("${sample}_filtered.bam.bai"), emit: filtered
+    path("${sample}_strobealign_log.txt"), emit: log
+
+    script:
+    """
+    # Step 1: map reads and sort
+    strobealign -t ${task.cpus} ${params.reference} ${r1} ${r2} 2> ${sample}_strobealign_log.txt | \\
+        samtools sort -@ ${task.cpus} -o ${sample}_sorted.bam
+    samtools index ${sample}_sorted.bam
+
+    # Step 2: filter reads by identity and coverage
+    samtools view -h ${sample}_sorted.bam | \\
+    gawk -v min_id=${params.min_identity} -v min_cov=${params.min_coverage} '
+    BEGIN {OFS="\\t"}
+    /^@/ {print; next}
+    {
+        seq      = \$10
+        read_len = length(seq)
+        cigar    = \$6
+        aligned  = 0
+        while (match(cigar, /([0-9]+)([M=X])/, a)) {
+            aligned += a[1]
+            cigar    = substr(cigar, RSTART+RLENGTH)
+        }
+        nm = -1
+        for (j=12; j<=NF; j++) if (\$j ~ /^NM:i:/) { nm = substr(\$j,6); break }
+        if (read_len > 0 && nm >= 0) {
+            id  = (read_len - nm) / read_len * 100
+            cov = aligned / read_len * 100
+            if (id >= min_id && cov >= min_cov) print
+        }
+    }' | samtools view -b -o ${sample}_filtered.bam
+
+    samtools index ${sample}_filtered.bam
+
+    # Remove the intermediate unfiltered BAM — only the filtered BAM is kept
+    rm ${sample}_sorted.bam ${sample}_sorted.bam.bai
+    """
+}
+
 workflow {
     // Read the samplesheet, one row per sample, and build (sample, [R1, R2]) tuples
     reads_ch = Channel
@@ -110,6 +163,7 @@ workflow {
     FASTQC(reads_ch)
     COUNT_READS(reads_ch)
     FASTP(reads_ch)
+    MAP_FILTER(FASTP.out.trimmed)
 
     // Merge every sample's small count file into one norm.tsv
     COUNT_READS.out.count
