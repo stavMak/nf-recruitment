@@ -3,9 +3,11 @@ nextflow.enable.dsl=2
 
 params.input         = 'samplesheet.csv'
 params.outdir        = 'results'
-params.reference     = '/media/penbio24/sata2/stavroula/20251027_spiking/20260611_recruitment_analysis/metapop/0_genomes/FZB42/FZB42_assembly.fna'
+params.reference     = '/media/penbio24/sata2/stavroula/20251027_spiking/illumina_150x2/6_NN_assembly/assembly_merged.fa'
 params.min_identity  = 90
 params.min_coverage  = 90
+params.min_cov_metapop = 20
+params.run_mapping   = true   // set to true (--run_mapping true) to run mapping/filtering + MetaPop after checking QC
 
 process FASTQC {
     tag "${sample}"
@@ -105,7 +107,7 @@ process MAP_FILTER {
     tag "${sample}"
     conda 'bioconda::strobealign=0.13.0 bioconda::samtools=1.19 conda-forge::gawk'
     publishDir { "${params.outdir}/5_mapping/${sample}" }, mode: 'copy'
-    cpus 15
+    cpus 16
 
     input:
     tuple val(sample), path(r1), path(r2)
@@ -151,6 +153,38 @@ process MAP_FILTER {
     """
 }
 
+process METAPOP {
+    conda '/home/penbio24/miniconda3/envs/metapop'
+    publishDir "${params.outdir}/6_metapop", mode: 'copy'
+    cpus 20
+
+    input:
+    path(bam_files)
+    path(norm_tsv)
+    path(reference)
+
+    output:
+    path("MetaPop")
+
+    script:
+    """
+    mkdir bam_dir
+    for f in *.bam *.bam.bai; do
+        ln -s "\$(realpath "\$f")" bam_dir/
+    done
+
+    mkdir ref_dir
+    ln -s "\$(realpath ${reference})" ref_dir/
+
+    metapop \\
+        --input_samples bam_dir/ \\
+        --threads ${task.cpus} \\
+        --reference ref_dir/ \\
+        --norm ${norm_tsv} \\
+        --min_cov ${params.min_cov_metapop}
+    """
+}
+
 workflow {
     // Read the samplesheet, one row per sample, and build (sample, [R1, R2]) tuples
     reads_ch = Channel
@@ -163,7 +197,6 @@ workflow {
     FASTQC(reads_ch)
     COUNT_READS(reads_ch)
     FASTP(reads_ch)
-    MAP_FILTER(FASTP.out.trimmed)
 
     // Merge every sample's small count file into one norm.tsv
     COUNT_READS.out.count
@@ -174,4 +207,20 @@ workflow {
 
     // MultiQC on the fastp reports (json + html)
     MULTIQC_FASTP(FASTP.out.json.mix(FASTP.out.html).collect())
+
+    // Mapping/filtering + MetaPop only run once you've checked QC and set --run_mapping true
+    if (params.run_mapping) {
+        MAP_FILTER(FASTP.out.trimmed)
+
+        // Collect all filtered BAMs (+ their index files) from every sample
+        all_bams_ch = MAP_FILTER.out.filtered
+            .flatMap { sample, bam, bai -> [bam, bai] }
+            .collect()
+
+        METAPOP(
+            all_bams_ch,
+            file("${params.outdir}/norm.tsv"),
+            file(params.reference)
+        )
+    }
 }
