@@ -1,13 +1,13 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-params.input         = 'samplesheet.csv'
-params.outdir        = 'results'
-params.reference     = '/media/penbio24/sata2/stavroula/20251027_spiking/illumina_150x2/6_NN_assembly/assembly_merged.fa'
-params.min_identity  = 90
-params.min_coverage  = 90
-params.min_cov_metapop = 20
-params.run_mapping   = true   // set to true (--run_mapping true) to run mapping/filtering + MetaPop after checking QC
+params.input            = 'samplesheet.csv'
+params.outdir           = 'results'
+params.reference        = '/media/penbio24/sata2/stavroula/20251027_spiking/20260909_FZB24_reference_genome/Gunter/FZB42.fasta'
+params.min_identity     = 90
+params.min_coverage     = 90
+params.min_cov_metapop  = 10
+params.run_mapping      = true   // set to true (--run_mapping true) to run mapping/filtering + MetaPop after checking QC
 
 process FASTQC {
     tag "${sample}"
@@ -103,14 +103,31 @@ process MULTIQC_FASTP {
     """
 }
 
+process BUILD_INDEX {
+    conda 'bioconda::strobealign=0.13.0'
+    cpus 8
+
+    input:
+    path(reference)
+
+    output:
+    tuple path(reference), path("${reference}.r*"), emit: indexed
+
+    script:
+    """
+    strobealign -t ${task.cpus} -r 150 --create-index ${reference}
+    """
+}
+
 process MAP_FILTER {
     tag "${sample}"
     conda 'bioconda::strobealign=0.13.0 bioconda::samtools=1.19 conda-forge::gawk'
     publishDir { "${params.outdir}/5_mapping/${sample}" }, mode: 'copy'
-    cpus 16
+    cpus 8
 
     input:
     tuple val(sample), path(r1), path(r2)
+    tuple path(reference), path(index_files)
 
     output:
     tuple val(sample), path("${sample}_filtered.bam"), path("${sample}_filtered.bam.bai"), emit: filtered
@@ -118,12 +135,10 @@ process MAP_FILTER {
 
     script:
     """
-    # Step 1: map reads and sort
-    strobealign -t ${task.cpus} ${params.reference} ${r1} ${r2} 2> ${sample}_strobealign_log.txt | \\
+    strobealign -t ${task.cpus} --use-index ${reference} ${r1} ${r2} 2> ${sample}_strobealign_log.txt | \\
         samtools sort -@ ${task.cpus} -o ${sample}_sorted.bam
     samtools index ${sample}_sorted.bam
 
-    # Step 2: filter reads by identity and coverage
     samtools view -h ${sample}_sorted.bam | \\
     gawk -v min_id=${params.min_identity} -v min_cov=${params.min_coverage} '
     BEGIN {OFS="\\t"}
@@ -148,7 +163,6 @@ process MAP_FILTER {
 
     samtools index ${sample}_filtered.bam
 
-    # Remove the intermediate unfiltered BAM — only the filtered BAM is kept
     rm ${sample}_sorted.bam ${sample}_sorted.bam.bai
     """
 }
@@ -156,7 +170,7 @@ process MAP_FILTER {
 process METAPOP {
     conda '/home/penbio24/miniconda3/envs/metapop'
     publishDir "${params.outdir}/6_metapop", mode: 'copy'
-    cpus 20
+    cpus 32
 
     input:
     path(bam_files)
@@ -210,7 +224,8 @@ workflow {
 
     // Mapping/filtering + MetaPop only run once you've checked QC and set --run_mapping true
     if (params.run_mapping) {
-        MAP_FILTER(FASTP.out.trimmed)
+        BUILD_INDEX(file(params.reference))
+        MAP_FILTER(FASTP.out.trimmed, BUILD_INDEX.out.indexed)
 
         // Collect all filtered BAMs (+ their index files) from every sample
         all_bams_ch = MAP_FILTER.out.filtered
