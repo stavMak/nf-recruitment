@@ -3,7 +3,8 @@ nextflow.enable.dsl=2
 
 params.input            = 'samplesheet.csv'
 params.outdir           = 'results'
-params.reference        = '/media/penbio24/sata2/stavroula/20251027_spiking/20260909_FZB24_reference_genome/Gunter/FZB42.fasta'
+params.reference        = null
+params.metapop_env      = null
 params.min_identity     = 90
 params.min_coverage     = 90
 params.min_cov_metapop  = 10
@@ -168,7 +169,7 @@ process MAP_FILTER {
 }
 
 process METAPOP {
-    conda '/home/penbio24/miniconda3/envs/metapop'
+    conda params.metapop_env
     publishDir "${params.outdir}/6_metapop", mode: 'copy'
     cpus 32
 
