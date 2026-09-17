@@ -9,7 +9,9 @@ params.min_identity     = 90
 params.min_coverage     = 90
 params.min_cov_metapop  = 20
 params.id_min_metapop   = 90
-params.run_mapping      = true   // set to true (--run_mapping true) to run mapping/filtering + MetaPop after checking QC
+params.run_mapping      = true   // set to true (--run_mapping true) to run mapping/filtering + MetaPop after 
+params.run_metapop      = true   // set false to run mapping but skip MetaPop
+checking QC
 
 process FASTQC {
     tag "${sample}"
@@ -244,10 +246,11 @@ workflow {
             .flatMap { sample, bam, bai -> [bam, bai] }
             .collect()
 
-        METAPOP(
-            all_bams_ch,
-            file("${params.outdir}/norm.tsv"),
-            file(params.reference)
-        )
+        if (params.run_metapop) {
+            METAPOP(
+                all_bams_ch,
+                file("${params.outdir}/norm.tsv"),
+                file(params.reference)
+            )
+        }
     }
-}
