@@ -8,11 +8,7 @@ RAW_FOLDERS=(
     .......
     )
 =======
-    "/media/penbio24/sata4/20260810_Lucas_shotgun_metagenomes_novogene/rawdata I/X204SC26072518-Z01-F002_01/01.RawData"
-    "/media/penbio24/sata4/20260810_Lucas_shotgun_metagenomes_novogene/rawdata I/X204SC26072518-Z01-F002_02/01.RawData"
-    "/media/penbio24/Exp_12TB2/20261014_recruitment/raw_data/X204SC26072518-Z01-F002_03/01.RawData"
-    "/media/penbio24/Exp_12TB2/20261014_recruitment/raw_data/X204SC26072518-Z01-F002_04/01.RawData"
-    "/media/penbio24/Exp_12TB2/20261014_recruitment/raw_data/X204SC26072518-Z01-F002_05/01.RawData"
+  ..........
 
 )
 >>>>>>> e624f53 (change input paths. rename samplesheet to create a new one with the rest samples)
