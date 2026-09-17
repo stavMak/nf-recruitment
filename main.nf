@@ -222,9 +222,18 @@ workflow {
     // MultiQC on the raw FastQC reports
     MULTIQC_FASTQC(FASTQC.out.qc.map { sample, files -> files }.collect())
 
-    // MultiQC on the fastp reports (json + html)
-    MULTIQC_FASTP(FASTP.out.json.mix(FASTP.out.html).collect())
+    // Fastp reports already on disk from previous runs
+    prev_fastp_ch = Channel.fromPath("${params.outdir}/2_fastp/**/*_fastp.{json,html}")
 
+    // MultiQC on ALL fastp reports: this run's fresh ones + any from previous runs
+    MULTIQC_FASTP(
+        FASTP.out.json
+            .mix(FASTP.out.html)
+            .mix(prev_fastp_ch)
+            .unique { it.name }
+            .collect()
+    )
+    
     // Mapping/filtering + MetaPop only run once you've checked QC and set --run_mapping true
     if (params.run_mapping) {
         BUILD_INDEX(file(params.reference))
