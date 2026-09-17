@@ -7,7 +7,8 @@ params.reference        = null
 params.metapop_env      = null
 params.min_identity     = 90
 params.min_coverage     = 90
-params.min_cov_metapop  = 10
+params.min_cov_metapop  = 20
+params.id_min_metapop   = 90
 params.run_mapping      = true   // set to true (--run_mapping true) to run mapping/filtering + MetaPop after checking QC
 
 process FASTQC {
@@ -196,7 +197,8 @@ process METAPOP {
         --threads ${task.cpus} \\
         --reference ref_dir/ \\
         --norm ${norm_tsv} \\
-        --min_cov ${params.min_cov_metapop}
+        --min_cov ${params.min_cov_metapop} \\
+        --id_min ${params.id_min_metapop}
     """
 }
 
