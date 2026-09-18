@@ -233,53 +233,64 @@ process METAPOP {
 
 workflow {
 
-    // ---------------- Inputs ----------------
-    // Samplesheet has ONE ROW PER LANE. A sample sequenced over several
-    // lanes appears on several rows sharing the same sample name.
-    rows_ch = Channel
-        .fromPath(params.input)
-        .splitCsv(header: true)
+    // ---------------- Normalize on/off switches ----------------
+    // Nextflow 26.x parses `--run_x false` from the command line as the STRING
+    // "false", which is truthy in Groovy (so `if (params.run_x)` would be true).
+    // Comparing the string form to 'true' gives a real boolean either way.
+    run_fastqc  = "${params.run_fastqc}"  == 'true'
+    run_fastp   = "${params.run_fastp}"   == 'true'
+    run_multiqc = "${params.run_multiqc}" == 'true'
+    run_mapping = "${params.run_mapping}" == 'true'
+    run_metapop = "${params.run_metapop}" == 'true'
 
-    // Per-lane tuples: used for raw FastQC and for lane merging.
-    // lane_id = the R1 filename without the _1.fq.gz suffix (unique per lane).
-    per_lane_ch = rows_ch.map { row ->
-        def lane_id = file(row.fastq_1).name.replaceAll(/_1\.fq\.gz$/, '')
-        tuple(row.sample, lane_id, file(row.fastq_1), file(row.fastq_2))
-    }
+    // ---------------- Inputs (only read when a QC/trim stage runs) ----------------
+    // The samplesheet is ONLY needed by FastQC / lane-merge / fastp. When those
+    // are switched off (e.g. QC was done outside the pipeline), it is not read at
+    // all, so no samplesheet.csv is required for mapping/metapop-only runs.
+    if (run_fastqc || run_fastp) {
 
-    // ---------------- Per-lane FastQC (raw reads) ----------------
-    if (params.run_fastqc) {
-        FASTQC(per_lane_ch)
-    }
+        // One row per lane; a sample over several lanes appears on several rows.
+        rows_ch = Channel
+            .fromPath(params.input, checkIfExists: true)
+            .splitCsv(header: true)
 
-    // ---------------- Merge lanes -> trim (fastp) + read counts ----------------
-    if (params.run_fastp) {
-        // Collect every lane of each sample into one group
-        grouped_ch = per_lane_ch
-            .map { sample, lane_id, r1, r2 -> tuple(sample, r1, r2) }
-            .groupTuple()   // -> (sample, [r1_laneA, r1_laneB, ...], [r2_laneA, r2_laneB, ...])
+        // Per-lane tuples: lane_id = R1 filename without the _1.fq.gz suffix.
+        per_lane_ch = rows_ch.map { row ->
+            def lane_id = file(row.fastq_1).name.replaceAll(/_1\.fq\.gz$/, '')
+            tuple(row.sample, lane_id, file(row.fastq_1), file(row.fastq_2))
+        }
 
-        MERGE_LANES(grouped_ch)
+        // Per-lane FastQC on raw reads
+        if (run_fastqc) {
+            FASTQC(per_lane_ch)
+        }
 
-        // Standard (sample, [R1, R2]) shape for the downstream QC processes
-        reads_ch = MERGE_LANES.out.merged.map { sample, r1, r2 -> tuple(sample, [r1, r2]) }
+        // Merge lanes -> trim (fastp) + read counts
+        if (run_fastp) {
+            grouped_ch = per_lane_ch
+                .map { sample, lane_id, r1, r2 -> tuple(sample, r1, r2) }
+                .groupTuple()   // -> (sample, [r1_laneA, ...], [r2_laneA, ...])
 
-        COUNT_READS(reads_ch)   // per-sample counts are published to 0_counts/
+            MERGE_LANES(grouped_ch)
 
-        FASTP(reads_ch)
+            reads_ch = MERGE_LANES.out.merged.map { sample, r1, r2 -> tuple(sample, [r1, r2]) }
+
+            COUNT_READS(reads_ch)   // per-sample counts are published to 0_counts/
+            FASTP(reads_ch)
+        }
     }
 
     // ---------------- MultiQC (this run's reports + whatever is on disk) ----------------
-    if (params.run_multiqc) {
+    if (run_multiqc) {
         // FastQC reports
-        fresh_fastqc = params.run_fastqc ? FASTQC.out.qc.map { s, files -> files } : Channel.empty()
+        fresh_fastqc = run_fastqc ? FASTQC.out.qc.map { s, files -> files } : Channel.empty()
         prev_fastqc  = Channel.fromPath("${params.outdir}/1_fastqc/**/*_fastqc.{zip,html}")
         MULTIQC_FASTQC(
             fresh_fastqc.mix(prev_fastqc).flatten().unique { it.name }.collect()
         )
 
         // fastp reports
-        fresh_fastp = params.run_fastp ? FASTP.out.json.mix(FASTP.out.html) : Channel.empty()
+        fresh_fastp = run_fastp ? FASTP.out.json.mix(FASTP.out.html) : Channel.empty()
         prev_fastp  = Channel.fromPath("${params.outdir}/2_fastp/**/*_fastp.{json,html}")
         MULTIQC_FASTP(
             fresh_fastp.mix(prev_fastp).unique { it.name }.collect()
@@ -288,9 +299,9 @@ workflow {
 
     // ---------------- Mapping / filtering ----------------
     fresh_bams_ch = Channel.empty()
-    if (params.run_mapping) {
+    if (run_mapping) {
         // Trimmed reads: fresh from FASTP this run, else read from disk (2_fastp)
-        if (params.run_fastp) {
+        if (run_fastp) {
             trimmed_ch = FASTP.out.trimmed
         } else {
             trimmed_ch = Channel
@@ -308,12 +319,12 @@ workflow {
     }
 
     // ---------------- MetaPop (all BAMs + all counts: fresh + from disk) ----------------
-    if (params.run_metapop) {
+    if (run_metapop) {
         // norm.tsv assembled from ALL per-sample counts:
         // fresh this run (if fastp ran) + every count already on disk (0_counts/).
         // collectFile returns the merged file as a channel, so METAPOP now waits
         // for it (proper dependency) instead of reading a path that may not exist yet.
-        fresh_counts_ch = params.run_fastp ? COUNT_READS.out.count : Channel.empty()
+        fresh_counts_ch = run_fastp ? COUNT_READS.out.count : Channel.empty()
         prev_counts_ch  = Channel.fromPath("${params.outdir}/0_counts/*_count.tsv")
 
         norm_ch = fresh_counts_ch
