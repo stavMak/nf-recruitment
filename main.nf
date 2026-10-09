@@ -164,12 +164,10 @@ process MAP_FILTER {
     path("${sample}_strobealign_log.txt"), emit: log
 
     script:
+    // strobealign SAM is filtered on the fly; only the kept reads are sorted
+    // and written, so no unfiltered BAM is ever written to disk.
     """
     strobealign -t ${task.cpus} --use-index ${reference} ${r1} ${r2} 2> ${sample}_strobealign_log.txt | \\
-        samtools sort -@ ${task.cpus} -o ${sample}_sorted.bam
-    samtools index ${sample}_sorted.bam
-
-    samtools view -h ${sample}_sorted.bam | \\
     gawk -v min_id=${params.min_identity} -v min_cov=${params.min_coverage} '
     BEGIN {OFS="\\t"}
     /^@/ {print; next}
@@ -189,11 +187,9 @@ process MAP_FILTER {
             cov = aligned / read_len * 100
             if (id >= min_id && cov >= min_cov) print
         }
-    }' | samtools view -b -o ${sample}_filtered.bam
+    }' | samtools sort -@ ${task.cpus} -o ${sample}_filtered.bam
 
     samtools index ${sample}_filtered.bam
-
-    rm ${sample}_sorted.bam ${sample}_sorted.bam.bai
     """
 }
 
