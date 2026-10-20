@@ -6,7 +6,7 @@
 # sample and merges the lanes before QC/trimming.
 
 RAW_FOLDERS=(
-        "/media/penbio24/sata4/20260810_Lucas_shotgun_metagenomes_novogene/rawdata II/X204SC26072518-Z01-F003_001/01.RawData"
+.....
 )
 
 echo "sample,fastq_1,fastq_2" > samplesheet.csv
