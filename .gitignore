@@ -15,3 +15,4 @@ report*.html
 samplesheet.csv
 local.config
 *.tar
+samplesheet*.csv
